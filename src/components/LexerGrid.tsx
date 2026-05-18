@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useRef, useMemo } from "react";
 import anime from "animejs";
 
 const COLS = 40;
@@ -6,56 +6,64 @@ const ROWS = 20;
 
 export default function LexerGrid() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const animationRef = useRef<anime.AnimeInstance | null>(null);
+  const lastAnimatedIndex = useRef<number>(-1);
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+  // Use useMemo to generate the grid geometry once instead of manipulating the DOM
+  const cells = useMemo(() => Array.from({ length: COLS * ROWS }), []);
 
-    // Clear previous if any
-    container.innerHTML = "";
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!containerRef.current) return;
+    
+    // Calculate precise grid cell based on pointer coordinates
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    const cellWidth = rect.width / COLS;
+    const cellHeight = rect.height / ROWS;
+    
+    const col = Math.floor(x / cellWidth);
+    const row = Math.floor(y / cellHeight);
+    
+    // Out of bounds check
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+    
+    const index = row * COLS + col;
+    
+    // Prevent spamming animations for the same index
+    if (index === lastAnimatedIndex.current) return; 
+    lastAnimatedIndex.current = index;
 
-    const total = COLS * ROWS;
-    for (let i = 0; i < total; i++) {
-        const span = document.createElement("span");
-        span.classList.add("grid-item", "inline-block", "w-4", "h-4", "text-center", "select-none", "text-slate-300", "font-mono", "text-xs", "font-bold", "opacity-40");
-        span.textContent = ".";
-        span.dataset.index = i.toString();
-        
-        span.addEventListener("mouseenter", (e) => {
-            const index = parseInt((e.target as HTMLSpanElement).dataset.index || "0");
-            
-            if (animationRef.current) {
-                // Not pausing, letting it overlap or create multiple ripples is fine,
-                // but for strict mechanical feel, maybe we constrain it.
-                // Let's create a new animation so ripples can overlap mathematically.
-            }
-
-            anime({
-                targets: '.grid-item',
-                scale: [
-                    { value: 2, easing: 'easeOutSine', duration: 250 },
-                    { value: 1, easing: 'easeInOutQuad', duration: 500 }
-                ],
-                color: [
-                    { value: '#3b82f6', easing: 'easeOutSine', duration: 250 },
-                    { value: '#cbd5e1', easing: 'easeInOutQuad', duration: 500 } // slate-300 is roughly cbd5e1
-                ],
-                opacity: [
-                    { value: 1, easing: 'easeOutSine', duration: 250 },
-                    { value: 0.4, easing: 'easeInOutQuad', duration: 500 }
-                ],
-                delay: anime.stagger(50, { grid: [COLS, ROWS], from: index }),
-                begin: function(anim) {
-                   // Changing text content dynamically isn't natively supported staggered via anime configuration easily
-                   // without using the update callback or a loop per target, but scale/color is native.
-                }
-            });
-        });
-
-        container.appendChild(span);
+    // Event Delegation: Select only the hovered cell and its immediate neighbors 
+    // to prevent layout thrashing on 800+ elements.
+    const targets: HTMLElement[] = [];
+    const radius = 2; // Spread effect radius
+    
+    for (let r = Math.max(0, row - radius); r <= Math.min(ROWS - 1, row + radius); r++) {
+       for (let c = Math.max(0, col - radius); c <= Math.min(COLS - 1, col + radius); c++) {
+           const idx = r * COLS + c;
+           const el = containerRef.current.children[idx] as HTMLElement;
+           if (el) targets.push(el);
+       }
     }
-  }, []);
+
+    // High performance orchestration for the targeted subset
+    anime({
+        targets,
+        scale: [
+            { value: 2, easing: 'easeOutSine', duration: 200 },
+            { value: 1, easing: 'easeInOutQuad', duration: 400 }
+        ],
+        color: [
+            { value: '#3b82f6', easing: 'easeOutSine', duration: 200 },
+            { value: '#cbd5e1', easing: 'easeInOutQuad', duration: 400 } // slate-300 fallback
+        ],
+        opacity: [
+            { value: 1, easing: 'easeOutSine', duration: 200 },
+            { value: 0.4, easing: 'easeInOutQuad', duration: 400 }
+        ]
+    });
+  };
 
   return (
     <div className="absolute inset-0 z-0 flex items-center justify-center bg-slate-50 overflow-hidden pointer-events-auto">
@@ -63,7 +71,16 @@ export default function LexerGrid() {
          ref={containerRef} 
          className="grid gap-1"
          style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))` }}
+         onPointerMove={handlePointerMove}
        >
+         {cells.map((_, i) => (
+            <span
+              key={i}
+              className="grid-item inline-block w-4 h-4 text-center select-none text-slate-300 font-mono text-xs font-bold opacity-40 transition-none"
+            >
+              .
+            </span>
+         ))}
        </div>
     </div>
   );

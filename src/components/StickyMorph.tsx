@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from "react";
-import anime from "animejs";
+import { motion, useScroll, useMotionValueEvent, AnimatePresence } from "motion/react";
 
 const states = [
   // State 0: Messy Python
@@ -30,9 +30,9 @@ const states = [
     { id: "func_def", text: "function process data:", indent: 0 },
     { id: "results_init", text: "let results be empty list", indent: 1 },
     { id: "for_item", text: "for each item in data:", indent: 1 },
-    { id: "with_lock", text: "in background:", indent: 2 }, // Re-using ID for morph
+    { id: "with_lock", text: "in background:", indent: 2 }, 
     { id: "append", text: "add item * 2 to results", indent: 3 },
-    { id: "for_threads", text: "wait for background", indent: 1 }, // Morphing join
+    { id: "for_threads", text: "wait for background", indent: 1 }, 
     { id: "return", text: "give results", indent: 1 },
   ],
   // State 2: Binary
@@ -49,208 +49,217 @@ const states = [
   ],
 ];
 
-export default function StickyMorph() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const codeBlockRef = useRef<HTMLDivElement>(null);
-  
-  const [activeState, setActiveState] = useState(0);
-  const isAnimating = useRef(false);
+// Custom Scramble Hook strictly managed in React
+function useScrambleText(text: string, isScrambling: boolean) {
+  const [displayText, setDisplayText] = useState(text);
 
   useEffect(() => {
-    const handleScroll = () => {
-      if (!containerRef.current || isAnimating.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      // Calculate progress 0 to 1 based on section being scrolled
-      const progress = Math.max(0, Math.min(1, -rect.top / (rect.height - window.innerHeight)));
-      
-      let nextState = 0;
-      if (progress >= 0.66) nextState = 2;
-      else if (progress >= 0.33) nextState = 1;
+    if (!isScrambling) {
+      setDisplayText(text);
+      return;
+    }
 
-      if (nextState !== activeState) {
-         isAnimating.current = true;
-         triggerTransition(nextState);
+    let timeoutId: NodeJS.Timeout;
+    const scramble = () => {
+      let scrambled = "";
+      for (let i = 0; i < text.length; i++) {
+        if (text[i] === " " || text[i] === "\n") {
+           scrambled += text[i];
+        } else {
+           scrambled += Math.random() > 0.5 ? "0" : "1";
+        }
       }
+      setDisplayText(scrambled);
+      timeoutId = setTimeout(scramble, 30);
     };
     
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, [activeState]);
+    scramble();
+    return () => clearTimeout(timeoutId);
+  }, [text, isScrambling]);
 
-  const triggerTransition = (nextState: number) => {
-     // Pipeline animation
-     const pathClass = nextState === 1 ? '.pipeline-path-1' : '.pipeline-path-2';
-     const particleClass = nextState === 1 ? '.pipeline-particle-1' : '.pipeline-particle-2';
-     
-     const pathEl = document.querySelector(pathClass) as SVGPathElement;
-     if (!pathEl) {
-        // Fallback if SVG not rendered
-        setActiveState(nextState);
-        isAnimating.current = false;
-        return;
-     }
+  return displayText;
+}
 
-     const path = anime.path(pathEl);
+// Line component applying Scramble and unified Layout
+function AnimatedLine({ line, isScrambling }: { line: any, isScrambling: boolean }) {
+  const text = useScrambleText(line.text, isScrambling);
+  
+  return (
+    <motion.div
+      layoutId={line.id}
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 10 }}
+      transition={{ duration: 0.3 }}
+      className="whitespace-pre flex code-line overflow-hidden"
+      style={{ paddingLeft: `${line.indent * 1.5}rem` }}
+    >
+      {text === "" ? <span className="inline-block h-6" /> : <span>{text}</span>}
+    </motion.div>
+  );
+}
 
-     anime.timeline({
-         complete: () => {
-             // Scramble effect on the text block
-             scrambleAndSwitch(nextState);
-         }
-     })
-     .add({
-         targets: pathClass,
-         strokeDashoffset: [anime.setDashoffset, 0],
-         duration: 800,
-         easing: 'easeInOutSine',
-         begin: () => {
-            (document.querySelector(pathClass) as SVGPathElement).style.opacity = '1';
-         }
-     })
-     .add({
-         targets: particleClass,
-         translateX: path('x'),
-         translateY: path('y'),
-         opacity: [0, 1, 1, 0], // fade in, stay, fade out at end
-         duration: 800,
-         easing: 'linear'
-     }, '-=800'); // Run simultaneously with path draw
-  };
+export default function StickyMorph() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // 1. Fixing the scroll threshold lag by offloading to Framer Motion's hardware-accelerated event mapping
+  const { scrollYProgress } = useScroll({
+    target: containerRef,
+    offset: ["start start", "end end"]
+  });
 
-  const scrambleAndSwitch = (nextState: number) => {
-      const codeBlock = codeBlockRef.current;
-      if (!codeBlock) {
-          setActiveState(nextState);
-          isAnimating.current = false;
-          return;
-      }
+  const [scrollState, setScrollState] = useState(0);
+  const [displayState, setDisplayState] = useState(0);
+  const [isScrambling, setIsScrambling] = useState(false);
+  const [showPathIndex, setShowPathIndex] = useState(-1);
 
-      const textNodes = Array.from(codeBlock.querySelectorAll('.code-line span'));
-      
-      // Fake scramble before switching content
-      const scrambleDuration = 200;
-      const scrambleInterval = 30; // update every 30ms
-      let elapsed = 0;
+  useMotionValueEvent(scrollYProgress, "change", (latest) => {
+    let nextState = 0;
+    if (latest >= 0.66) nextState = 2;
+    else if (latest >= 0.33) nextState = 1;
+    
+    if (nextState !== scrollState) {
+        setScrollState(nextState);
+    }
+  });
 
-      const interval = setInterval(() => {
-          textNodes.forEach(node => {
-              const originalLength = node.textContent?.length || 10;
-              let scrambled = '';
-              for (let i = 0; i < originalLength; i++) {
-                  scrambled += Math.random() > 0.5 ? '0' : '1';
-              }
-              node.textContent = scrambled;
-          });
-          
-          elapsed += scrambleInterval;
-          if (elapsed >= scrambleDuration) {
-              clearInterval(interval);
-              setActiveState(nextState);
-              // Wait a tiny bit for React to render new state, then clear animation flag
-              setTimeout(() => {
-                  isAnimating.current = false;
-                  // Reset SVG paths for scrolling back up
-                  document.querySelectorAll('.pipeline-path-1, .pipeline-path-2').forEach(el => {
-                      (el as SVGPathElement).style.opacity = '0';
-                  });
-              }, 50);
-          }
-      }, scrambleInterval);
-  };
+  useEffect(() => {
+    if (scrollState === displayState) return;
 
-  const currentLines = states[activeState];
+    // Orchestrate SVG line drawing -> Scramble -> Change State purely via React logic
+    const forward = scrollState > displayState;
+    const pathIdx = forward ? scrollState : displayState; 
+    
+    setShowPathIndex(pathIdx);
+    
+    // Give time for SVG path to visually draw
+    const t1 = setTimeout(() => {
+        setIsScrambling(true);
+        // Scramble execution
+        const t2 = setTimeout(() => {
+            setDisplayState(scrollState);
+            setIsScrambling(false);
+            setShowPathIndex(-1);
+        }, 200);
+        return () => clearTimeout(t2);
+    }, 500);
+
+    return () => clearTimeout(t1);
+  }, [scrollState, displayState]);
+
+  const currentLines = states[displayState];
 
   return (
     <section ref={containerRef} className="relative h-[300vh] w-full bg-slate-50 text-slate-900 pointer-events-auto">
-      {/* Intricate SVG Compiler Pipeline */}
-      <div className="absolute inset-x-0 inset-y-0 pointer-events-none flex justify-center items-center z-20" style={{position: 'fixed'}}>
-          <svg className="w-full h-full" style={{ maxWidth: '1200px' }} preserveAspectRatio="xMidYMid meet">
-             {/* Path 1: Python to Layman */}
-             <path 
-                className="pipeline-path-1" 
+      {/* Intricate SVG Compiler Pipeline orchestrated smoothly via Framer Motion without hacking the DOM */}
+      <div className="absolute inset-0 pointer-events-none flex justify-center items-center z-20 sticky top-0 h-screen max-w-7xl mx-auto">
+          <svg className="w-full h-full" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid meet">
+             <motion.path 
                 d="M 100 200 C 300 200, 400 400, 600 400" 
-                stroke="#3b82f6" strokeWidth="4" fill="none" opacity="0" 
+                stroke="#3b82f6" strokeWidth="4" fill="none"
                 style={{ filter: 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.8))' }}
+                initial={{ pathLength: 0, opacity: 0 }}
+                animate={{ 
+                    pathLength: showPathIndex === 1 ? 1 : 0, 
+                    opacity: showPathIndex === 1 ? 1 : 0 
+                }}
+                transition={{ duration: 0.5, ease: "easeInOut" }}
              />
-             <circle className="pipeline-particle-1" r="6" fill="#60a5fa" opacity="0" style={{ filter: 'drop-shadow(0 0 10px #60a5fa)' }} />
-
-             {/* Path 2: Layman to Binary */}
-             <path 
-                className="pipeline-path-2" 
+             <motion.path 
                 d="M 100 500 C 300 500, 400 300, 600 300" 
-                stroke="#10b981" strokeWidth="4" fill="none" opacity="0" 
+                stroke="#10b981" strokeWidth="4" fill="none"
                 style={{ filter: 'drop-shadow(0 0 8px rgba(16, 185, 129, 0.8))' }}
+                initial={{ pathLength: 0, opacity: 0 }}
+                animate={{ 
+                    pathLength: showPathIndex === 2 ? 1 : 0, 
+                    opacity: showPathIndex === 2 ? 1 : 0 
+                }}
+                transition={{ duration: 0.5, ease: "easeInOut" }}
              />
-             <circle className="pipeline-particle-2" r="6" fill="#34d399" opacity="0" style={{ filter: 'drop-shadow(0 0 10px #34d399)' }} />
           </svg>
       </div>
 
-      <div className="sticky top-0 h-screen w-full flex items-center max-w-7xl mx-auto px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 w-full pt-20">
+      <div className="sticky top-0 h-screen w-full flex flex-col justify-center max-w-7xl mx-auto px-6 lg:px-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 w-full pt-10 lg:pt-20 items-center">
           
           {/* Left Column: Morphing Code Block */}
-          <div className="flex flex-col justify-center relative z-10 w-full">
-            <h2 className="font-display text-4xl sm:text-5xl font-extrabold tracking-tighter mb-6 text-slate-900 leading-tight h-24">
-              {activeState === 0 && "From messy syntax..."}
-              {activeState === 1 && "To plain English..."}
-              {activeState === 2 && "To bare metal."}
+          <div className="flex flex-col justify-center relative z-10 w-full mb-8 lg:mb-0">
+            <h2 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tighter mb-4 lg:mb-6 text-slate-900 leading-tight lg:h-24">
+              {displayState === 0 && "From messy syntax..."}
+              {displayState === 1 && "To plain English..."}
+              {displayState === 2 && "To bare metal."}
             </h2>
 
-            <div className="relative rounded-2xl bg-white/40 backdrop-blur-md border border-white/60 shadow-xl overflow-hidden p-6 md:p-8 font-mono text-sm sm:text-base leading-relaxed text-slate-800 min-h-[450px]">
-              {/* Optional macOS-style dots inside the glass container */}
+            <div className="relative rounded-2xl bg-white/40 backdrop-blur-md border border-white/60 shadow-xl overflow-hidden p-6 md:p-8 font-mono text-sm sm:text-base leading-relaxed text-slate-800 min-h-[400px] lg:min-h-[450px]">
               <div className="flex space-x-2 mb-6">
                 <div className="w-3 h-3 rounded-full bg-slate-300"></div>
                 <div className="w-3 h-3 rounded-full bg-slate-300"></div>
                 <div className="w-3 h-3 rounded-full bg-slate-300"></div>
               </div>
 
-              <div className="relative flex flex-col w-full" ref={codeBlockRef}>
-                  {currentLines.map((line) => (
-                    <div
-                      key={line.id}
-                      className="whitespace-pre flex code-line overflow-hidden"
-                      style={{ paddingLeft: `${line.indent * 1.5}rem` }}
-                    >
-                      {/* Give empty lines a min height so they layout properly */}
-                      {line.text === "" ? <span className="inline-block h-6" /> : <span>{line.text}</span>}
-                    </div>
-                  ))}
+              <div className="relative flex flex-col w-full">
+                 <AnimatePresence mode="popLayout">
+                    {currentLines.map((line) => (
+                      <AnimatedLine key={line.id} line={line} isScrambling={isScrambling} />
+                    ))}
+                 </AnimatePresence>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Scroll descriptions */}
-          <div className="hidden lg:flex flex-col justify-center text-lg text-slate-600 space-y-4 max-w-md relative z-10 h-[200px]">
-              {activeState === 0 && (
-                <div>
+          {/* Right Column: Scroll descriptions (Fix Mobile UX Blackhole) */}
+          {/* Always display on mobile, flex col underneath safely cross-fading */}
+          <div className="flex flex-col justify-start lg:justify-center text-base lg:text-lg text-slate-600 space-y-4 max-w-md relative z-10 w-full lg:h-[200px]">
+            <AnimatePresence mode="wait">
+              {displayState === 0 && (
+                <motion.div
+                  key="desc-0"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                >
                   <p className="mb-4">
                     Traditional languages force you to act as a human compiler. You manage locks, map threads, and fight with syntactic noise.
                   </p>
                   <p>
                     Scroll down to see the Layman difference.
                   </p>
-                </div>
+                </motion.div>
               )}
-              {activeState === 1 && (
-                <div>
+              {displayState === 1 && (
+                <motion.div
+                  key="desc-1"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                >
                   <p className="mb-4">
                     Layman handles the complexity for you. Concurrency, memory management, and data structures are expressed in intent-driven English.
                   </p>
                   <p>
                     No more boilerplate. Just logic.
                   </p>
-                </div>
+                </motion.div>
               )}
-              {activeState === 2 && (
-                <div>
+              {displayState === 2 && (
+                <motion.div
+                  key="desc-2"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                >
                   <p className="mb-4">
                     Yet, it doesn't run on a slow VM. Layman uses an intense LLVM backend optimization pass to compile your intent directly to blazingly fast machine code.
                   </p>
                   <p>
                     Zero overhead. Maximum performance.
                   </p>
-                </div>
+                </motion.div>
               )}
+            </AnimatePresence>
           </div>
 
         </div>
