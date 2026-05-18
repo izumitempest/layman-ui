@@ -1,0 +1,8 @@
+{
+  "name": "Layman",
+  "description": "The programming language for everyone else. Turing-complete systems language that compiles to standalone executables but reads like plain English.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
