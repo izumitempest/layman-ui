@@ -1,6 +1,5 @@
-import { useRef, useState } from "react";
-import { motion, useScroll, useTransform, AnimatePresence, useReducedMotion, useMotionValueEvent } from "motion/react";
-import { cn } from "../lib/utils";
+import { useRef, useState, useEffect } from "react";
+import anime from "animejs";
 
 const states = [
   // State 0: Messy Python
@@ -52,47 +51,146 @@ const states = [
 
 export default function StickyMorph() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const shouldReduceMotion = useReducedMotion();
+  const codeBlockRef = useRef<HTMLDivElement>(null);
   
-  const { scrollYProgress } = useScroll({
-    target: containerRef,
-    offset: ["start start", "end end"]
-  });
-
-  const parallaxY = useTransform(scrollYProgress, [0, 1], ["0%", "-50%"]);
-
-  // We map scroll progress to a discrete state integer: 0, 1, or 2.
   const [activeState, setActiveState] = useState(0);
+  const isAnimating = useRef(false);
 
-  // Update state without causing React warnings in render, using useMotionValueEvent
-  useMotionValueEvent(scrollYProgress, "change", (latest) => {
-    if (latest < 0.33) {
-      if (activeState !== 0) setActiveState(0);
-    } else if (latest >= 0.33 && latest < 0.66) {
-      if (activeState !== 1) setActiveState(1);
-    } else {
-      if (activeState !== 2) setActiveState(2);
-    }
-  });
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!containerRef.current || isAnimating.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      // Calculate progress 0 to 1 based on section being scrolled
+      const progress = Math.max(0, Math.min(1, -rect.top / (rect.height - window.innerHeight)));
+      
+      let nextState = 0;
+      if (progress >= 0.66) nextState = 2;
+      else if (progress >= 0.33) nextState = 1;
+
+      if (nextState !== activeState) {
+         isAnimating.current = true;
+         triggerTransition(nextState);
+      }
+    };
+    
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [activeState]);
+
+  const triggerTransition = (nextState: number) => {
+     // Pipeline animation
+     const pathClass = nextState === 1 ? '.pipeline-path-1' : '.pipeline-path-2';
+     const particleClass = nextState === 1 ? '.pipeline-particle-1' : '.pipeline-particle-2';
+     
+     const pathEl = document.querySelector(pathClass) as SVGPathElement;
+     if (!pathEl) {
+        // Fallback if SVG not rendered
+        setActiveState(nextState);
+        isAnimating.current = false;
+        return;
+     }
+
+     const path = anime.path(pathEl);
+
+     anime.timeline({
+         complete: () => {
+             // Scramble effect on the text block
+             scrambleAndSwitch(nextState);
+         }
+     })
+     .add({
+         targets: pathClass,
+         strokeDashoffset: [anime.setDashoffset, 0],
+         duration: 800,
+         easing: 'easeInOutSine',
+         begin: () => {
+            (document.querySelector(pathClass) as SVGPathElement).style.opacity = '1';
+         }
+     })
+     .add({
+         targets: particleClass,
+         translateX: path('x'),
+         translateY: path('y'),
+         opacity: [0, 1, 1, 0], // fade in, stay, fade out at end
+         duration: 800,
+         easing: 'linear'
+     }, '-=800'); // Run simultaneously with path draw
+  };
+
+  const scrambleAndSwitch = (nextState: number) => {
+      const codeBlock = codeBlockRef.current;
+      if (!codeBlock) {
+          setActiveState(nextState);
+          isAnimating.current = false;
+          return;
+      }
+
+      const textNodes = Array.from(codeBlock.querySelectorAll('.code-line span'));
+      
+      // Fake scramble before switching content
+      const scrambleDuration = 200;
+      const scrambleInterval = 30; // update every 30ms
+      let elapsed = 0;
+
+      const interval = setInterval(() => {
+          textNodes.forEach(node => {
+              const originalLength = node.textContent?.length || 10;
+              let scrambled = '';
+              for (let i = 0; i < originalLength; i++) {
+                  scrambled += Math.random() > 0.5 ? '0' : '1';
+              }
+              node.textContent = scrambled;
+          });
+          
+          elapsed += scrambleInterval;
+          if (elapsed >= scrambleDuration) {
+              clearInterval(interval);
+              setActiveState(nextState);
+              // Wait a tiny bit for React to render new state, then clear animation flag
+              setTimeout(() => {
+                  isAnimating.current = false;
+                  // Reset SVG paths for scrolling back up
+                  document.querySelectorAll('.pipeline-path-1, .pipeline-path-2').forEach(el => {
+                      (el as SVGPathElement).style.opacity = '0';
+                  });
+              }, 50);
+          }
+      }, scrambleInterval);
+  };
 
   const currentLines = states[activeState];
 
   return (
-    <section ref={containerRef} className="relative h-[300vh] w-full bg-slate-50 text-slate-900">
-      {/* Background Parallax */}
-      <motion.div 
-        className="absolute inset-0 z-0 flex items-center justify-center opacity-10 pointer-events-none"
-        style={shouldReduceMotion ? {} : { y: parallaxY }}
-      >
-        <div className="w-[800px] h-[800px] rounded-full blur-3xl bg-slate-300" />
-      </motion.div>
+    <section ref={containerRef} className="relative h-[300vh] w-full bg-slate-50 text-slate-900 pointer-events-auto">
+      {/* Intricate SVG Compiler Pipeline */}
+      <div className="absolute inset-x-0 inset-y-0 pointer-events-none flex justify-center items-center z-20" style={{position: 'fixed'}}>
+          <svg className="w-full h-full" style={{ maxWidth: '1200px' }} preserveAspectRatio="xMidYMid meet">
+             {/* Path 1: Python to Layman */}
+             <path 
+                className="pipeline-path-1" 
+                d="M 100 200 C 300 200, 400 400, 600 400" 
+                stroke="#3b82f6" strokeWidth="4" fill="none" opacity="0" 
+                style={{ filter: 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.8))' }}
+             />
+             <circle className="pipeline-particle-1" r="6" fill="#60a5fa" opacity="0" style={{ filter: 'drop-shadow(0 0 10px #60a5fa)' }} />
+
+             {/* Path 2: Layman to Binary */}
+             <path 
+                className="pipeline-path-2" 
+                d="M 100 500 C 300 500, 400 300, 600 300" 
+                stroke="#10b981" strokeWidth="4" fill="none" opacity="0" 
+                style={{ filter: 'drop-shadow(0 0 8px rgba(16, 185, 129, 0.8))' }}
+             />
+             <circle className="pipeline-particle-2" r="6" fill="#34d399" opacity="0" style={{ filter: 'drop-shadow(0 0 10px #34d399)' }} />
+          </svg>
+      </div>
 
       <div className="sticky top-0 h-screen w-full flex items-center max-w-7xl mx-auto px-6 lg:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 w-full pt-20">
           
           {/* Left Column: Morphing Code Block */}
           <div className="flex flex-col justify-center relative z-10 w-full">
-            <h2 className="font-display text-4xl sm:text-5xl font-extrabold tracking-tighter mb-6 text-slate-900 leading-tight">
+            <h2 className="font-display text-4xl sm:text-5xl font-extrabold tracking-tighter mb-6 text-slate-900 leading-tight h-24">
               {activeState === 0 && "From messy syntax..."}
               {activeState === 1 && "To plain English..."}
               {activeState === 2 && "To bare metal."}
@@ -106,85 +204,53 @@ export default function StickyMorph() {
                 <div className="w-3 h-3 rounded-full bg-slate-300"></div>
               </div>
 
-              <div className="relative flex flex-col w-full">
-                <AnimatePresence mode="popLayout">
+              <div className="relative flex flex-col w-full" ref={codeBlockRef}>
                   {currentLines.map((line) => (
-                    <motion.div
+                    <div
                       key={line.id}
-                      layoutId={line.id}
-                      initial={{ opacity: 0, x: -20, filter: "blur(4px)" }}
-                      animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-                      exit={{ opacity: 0, x: 20, filter: "blur(4px)" }}
-                      transition={{ 
-                        type: "spring", 
-                        stiffness: 150, 
-                        damping: 20, 
-                        mass: 0.8 
-                      }}
-                      className="whitespace-pre flex"
+                      className="whitespace-pre flex code-line overflow-hidden"
                       style={{ paddingLeft: `${line.indent * 1.5}rem` }}
                     >
                       {/* Give empty lines a min height so they layout properly */}
-                      {line.text === "" ? <span className="inline-block h-6" /> : line.text}
-                    </motion.div>
+                      {line.text === "" ? <span className="inline-block h-6" /> : <span>{line.text}</span>}
+                    </div>
                   ))}
-                </AnimatePresence>
               </div>
             </div>
           </div>
 
           {/* Right Column: Scroll descriptions */}
-          <div className="hidden lg:flex flex-col justify-center text-lg text-slate-600 space-y-4 max-w-md relative z-10">
-            <AnimatePresence mode="wait">
+          <div className="hidden lg:flex flex-col justify-center text-lg text-slate-600 space-y-4 max-w-md relative z-10 h-[200px]">
               {activeState === 0 && (
-                <motion.div
-                  key="desc-0"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.4 }}
-                >
+                <div>
                   <p className="mb-4">
                     Traditional languages force you to act as a human compiler. You manage locks, map threads, and fight with syntactic noise.
                   </p>
                   <p>
                     Scroll down to see the Layman difference.
                   </p>
-                </motion.div>
+                </div>
               )}
               {activeState === 1 && (
-                <motion.div
-                  key="desc-1"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.4 }}
-                >
+                <div>
                   <p className="mb-4">
                     Layman handles the complexity for you. Concurrency, memory management, and data structures are expressed in intent-driven English.
                   </p>
                   <p>
                     No more boilerplate. Just logic.
                   </p>
-                </motion.div>
+                </div>
               )}
               {activeState === 2 && (
-                <motion.div
-                  key="desc-2"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.4 }}
-                >
+                <div>
                   <p className="mb-4">
                     Yet, it doesn't run on a slow VM. Layman uses an intense LLVM backend optimization pass to compile your intent directly to blazingly fast machine code.
                   </p>
                   <p>
                     Zero overhead. Maximum performance.
                   </p>
-                </motion.div>
+                </div>
               )}
-            </AnimatePresence>
           </div>
 
         </div>
